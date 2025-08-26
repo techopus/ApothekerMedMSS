@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 import subprocess, json
 import os
+import requests
 
 app = FastAPI()
 
@@ -9,6 +10,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -36,5 +38,34 @@ def search_medicine(query: str):
         return data
     except subprocess.CalledProcessError as e:
         return {"error": e.stderr or str(e)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/gemini")
+def gemini_proxy(query: str = Query(...), filters: str = Query("")):
+    """
+    Proxy endpoint to call Gemini API securely.
+    """
+    api_key = os.getenv("API_KEY")  # Loaded from Render Environment Variable
+    if not api_key:
+        return {"error": "API key not configured"}
+
+    model = "gemini-2.0-flash"
+    prompt = f"Given the query {query}, with filters {filters}, return medicine recommendations in JSON."
+
+    try:
+        response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
+            headers={"Content-Type": "application/json"},
+            json={
+                "contents": [
+                    {"role": "user", "parts": [{"text": prompt}]}
+                ]
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
     except Exception as e:
         return {"error": str(e)}
