@@ -1,5 +1,5 @@
-# Create .gitignore with appropriate content
-echo "# Python
+@"
+# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -35,4 +35,5 @@ Thumbs.db
 
 # Logs
 logs/
-*.log" > .gitignore
+*.log
+"@ | Out-File -FilePath .gitignore -Encoding UTF8
