@@ -47,7 +47,7 @@ def gemini_proxy(query: str = Query(...), filters: str = Query("")):
     """
     Proxy endpoint to call Gemini API securely.
     """
-    api_key = os.getenv("API_KEY")  # Loaded from Render Environment Variable
+    api_key = os.getenv("GEMINI_API_KEY")  # Loaded from Render Environment Variable
     if not api_key:
         return {"error": "API key not configured"}
 
