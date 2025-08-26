@@ -52,7 +52,7 @@ def gemini_proxy(query: str = Query(...), filters: str = Query("")):
         return {"error": "API key not configured"}
 
     model = "gemini-2.0-flash"
-    prompt = f"Given the query {query}, with filters {filters}, return medicine recommendations in JSON."
+    prompt = query
 
     try:
         response = requests.post(
