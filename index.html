@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Apotheke Medizin Finder mit MSS Strategie</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; background: #f8f9fa; }
+    h1 { color: #0d6efd; }
+    .search-box, .filters { margin-bottom: 1rem; }
+    input, select, button { padding: 0.5rem; font-size: 1rem; margin: 0.25rem; }
+    .results { margin-top: 1rem; }
+    .card { background: #fff; padding: 1rem; margin-bottom: 1rem; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    pre { white-space: pre-wrap; background: #f1f1f1; padding: 0.5rem; border-radius: 4px; }
+    .mss { margin-top: 1rem; background: #e9f7ef; padding: 1rem; border-radius: 8px; }
+    .section-title { margin-top: 2rem; color: #198754; }
+    #apotheke-section { display: none; } /* hide by default */
+  </style>
+</head>
+<body>
+  <h1>Apotheke Medizin Finder mit MSS Strategie</h1>
+
+  <!-- Search Box -->
+  <div class="search-box">
+    <input id="query" type="text" placeholder="Medizin oder Symptom eingeben..." size="40">
+    <button onclick="searchMedicine()">Suchen</button>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters">
+    <h3>Filter (optional)</h3>
+    <label>Alter: 
+      <select id="age">
+        <option value="">--egal--</option>
+        <option value="Kinder">Kinder</option>
+        <option value="Erwachsene">Erwachsene</option>
+        <option value="Senioren">Senioren</option>
+      </select>
+    </label>
+    <label>Geschlecht: 
+      <select id="gender">
+        <option value="">--egal--</option>
+        <option value="männlich">Männlich</option>
+        <option value="weiblich">Weiblich</option>
+      </select>
+    </label>
+    <label>Allergien: <input id="allergies" type="text" placeholder="z.B. Laktose, Gluten"></label>
+    <label>Vegan: 
+      <select id="vegan">
+        <option value="">--egal--</option>
+        <option value="true">Ja</option>
+        <option value="false">Nein</option>
+      </select>
+    </label>
+    <label>Rezeptpflichtig: 
+      <select id="rx">
+        <option value="">--egal--</option>
+        <option value="true">Ja</option>
+        <option value="false">Nein</option>
+      </select>
+    </label>
+  </div>
+<label>Wetter: 
+  <select id="weather" onchange="toggleCityInput()">
+    <option value="">--egal--</option>
+    <option value="current">Aktuelles Wetter</option>
+    <option value="Heiß (≥28°C)">Heiß (≥ 28°C)</option>
+    <option value="Mild (15–27°C)">Mild (15–27°C)</option>
+    <option value="Kalt (≤14°C)">Kalt (≤ 14°C)</option>
+  </select>
+</label>
+
+<label id="city-label">Stadt: 
+  <input id="city" type="text" placeholder="z.B. Berlin, München" style="display:none;">
+</label>
+
+
+
+
+
+  <!-- Results -->
+  <div id="results" class="results"></div>
+
+  <!-- Apotheke Section (hidden until button pressed) -->
+  <button id="toggleApothekeBtn" onclick="toggleApotheke()" style="margin-top:1rem; padding:0.5rem 1rem; font-size:1rem; display:none;">
+     Preussen Apotheke Ergebnisse anzeigen
+  </button>
+  <div id="apotheke-section"></div>
+
+  <script>
+
+    // const BACKEND_URL = "http://127.0.0.1:8000"; // FastAPI backend for scraper =Prussuen
+    const BACKEND_URL ="https://apotheke-backend.onrender.com/";   // fastapi w/
+    const WEATHER_API_KEY = "weather_api"; // wll need our api key here
+    //const WEATHER_CITY = "Berlin,de"; // 
+
+    let lastApothekeResults = []; // cache so toggle works
+
+
+
+    // Show/Hide city input depending on weather choice
+    function toggleCityInput() {
+      const weather = document.getElementById("weather").value;
+      const cityInput = document.getElementById("city");
+      cityInput.style.display = weather === "current" ? "inline-block" : "none";
+    }
+
+
+     // needAPI key to fetch current accurate weather later  == 
+
+    async function getCurrentWeather(city) {
+      try {
+        const res = await fetch(
+          `https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&appid=${WEATHER_API_KEY}`
+        );
+        const data = await res.json();
+        if (data.cod !== 200) return `Wetterdaten für ${city} nicht verfügbar`;
+        const desc = data.weather[0].description;
+        const temp = data.main.temp;
+        return `${desc}, ${temp}°C in ${city}`;
+      } catch (e) {
+        console.error("Weather API error", e);
+        return "unbekannt";
+      }
+    }
+
+
+    async function fetchWeatherInfo(city) {
+      const prompt = `Gib mir nur eine sehr kurze Beschreibung des aktuellen Wetters in ${city}, inklusive Temperatur in °C (z. B. "18°C, sonnig"). Antworte nur mit diesem Satz, keine weiteren Infos.`;
+
+      try {
+        const res = await fetch(
+          `${BACKEND_URL}/gemini?query=${encodeURIComponent(prompt)}`
+        );
+        const data = await res.json();
+        return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      } catch (err) {
+        console.error("Weather fetch via Gemini proxy failed", err);
+        return "";
+      }
+    }
+
+
+    async function searchMedicine() {
+      const query = document.getElementById("query").value;
+      if (!query) return;
+
+      document.getElementById("results").innerHTML = "Suche läuft...";
+      document.getElementById("apotheke-section").style.display = "none";
+      document.getElementById("toggleApothekeBtn").style.display = "none";
+
+      const filters = {
+        age: document.getElementById("age").value,
+        gender: document.getElementById("gender").value,
+        allergies: document.getElementById("allergies").value,
+        vegan: document.getElementById("vegan").value,
+        rx: document.getElementById("rx").value,
+        weather: document.getElementById("weather").value,
+      };
+
+      // If weather = current → fetch real weather
+      // if (filters.weather === "current") {
+      //   const city = document.getElementById("city").value || "Berlin,de"; // fallback or weather_ciITY defined
+      //   filters.weather = await getCurrentWeather(city);   // by calling this function we have
+      // }
+
+
+      // if "current weather", we letting are Gemini handle it with city
+      let weatherInfo = "";
+      if (filters.weather === "current") {
+        const city = document.getElementById("city").value || "Berlin";
+        weatherInfo = await fetchWeatherInfo(city);   // fetch actual weather from Gemini
+        filters.weather = `aktuelles Wetter in ${city}`;
+      }
+
+
+
+      const filterText = Object.entries(filters)
+        .filter(([_, v]) => v)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(", ");
+
+      // Runn both Gemini + Scraper in parallel
+      const [geminiResults, apothekeResults] = await Promise.all([
+        fetchGemini(query, filterText),
+        fetchApotheke(query)
+      ]);
+
+      lastApothekeResults = apothekeResults; // save for toggle
+      renderResults(geminiResults, weatherInfo || filters.weather);  // passing weatehr info to render like recomm resukts
+      if (apothekeResults.length > 0) {
+        document.getElementById("toggleApothekeBtn").style.display = "inline-block";
+      }
+    }
+
+
+    async function fetchGemini(query, filterText) {
+  const prompt = `
+You are a professional German pharmacy assistant. Given the user query ("${query}"), return a JSON array of recommended medicines available in German pharmacies. 
+If filters are provided, consider them: ${filterText || "none"}.
+
+For each medicine, provide:
+- product_name
+- brand
+- pzn
+- pack_sizes
+- vegan
+- rx_required
+- active_ingredient
+- dose_per_unit
+- indications
+- why_recommended
+- confidence
+
+Return JSON only.
+`;
+
+  try {
+    const res = await fetch(
+      `${BACKEND_URL}/gemini?query=${encodeURIComponent(prompt)}`
+    );
+    const data = await res.json();
+
+    let text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    text = text.trim();
+
+    // remove markdown fences if model returns with ```json
+    if (text.startsWith("```")) {
+      text = text.replace(/```(json)?/g, "").trim();
+    }
+
+    return JSON.parse(text);
+  } catch (err) {
+    console.error("Gemini error:", err);
+    return [];
+  }
+}
+
+
+    async function fetchApotheke(query) {
+      try {
+        const res = await fetch(`${BACKEND_URL}/search?query=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        return data.results || [];
+      } catch (err) {
+        console.error("Apotheke error:", err);
+        return [];
+      }
+    }
+
+
+
+    // function renderResults(gemini) {
+    //   const container = document.getElementById("results");
+    //   container.innerHTML = "";
+
+
+    function renderResults(gemini = [], weatherInfo = "") {
+      const container = document.getElementById("results");
+      container.innerHTML = "";
+
+      if (weatherInfo) {
+        const weatherBox = document.createElement("div");
+        weatherBox.className = "card";
+        weatherBox.innerHTML = `<b>Aktuelles Wetter:</b> ${weatherInfo}`;
+        container.appendChild(weatherBox);
+      }
+
+
+      // Gemini Section
+      const geminiSection = document.createElement("div");
+      geminiSection.innerHTML = `<h2 class="section-title"> Empfehlungen (AI)</h2>`;
+      if (gemini.length === 0) {
+        geminiSection.innerHTML += "<p>Keine Ergebnisse gefunden.</p>";
+      } else {
+        gemini.forEach((med, idx) => {
+          const card = document.createElement("div");
+          card.className = "card";
+          card.innerHTML = `
+            <h3>${med.product_name || "Unbekannt"} (${med.brand || ""})</h3>
+            <p><b>PZN:</b> ${med.pzn || "-"}<br>
+               <b>Wirkstoff:</b> ${med.active_ingredient || "-"}<br>
+               <b>Dosis:</b> ${med.dose_per_unit || "-"}<br>
+               <b>Packs:</b> ${med.pack_sizes || "-"}<br>
+               <b>Vegan:</b> ${med.vegan}<br>
+               <b>Rezeptpflichtig:</b> ${med.rx_required}<br>
+               <b>Indikationen:</b> ${med.indications || "-"}<br>
+               <b>Empfehlung:</b> ${med.why_recommended || "-"}<br>
+               <b>Sicherheit:</b> ${med.confidence || "-"}<br>
+            </p>
+            <button onclick="getMSS('${encodeURIComponent(JSON.stringify(med))}', 'gemini-${idx}')">Get MSS Strategy</button>
+            <div id="mss-gemini-${idx}" class="mss"></div>
+          `;
+          geminiSection.appendChild(card);
+        });
+      }
+      container.appendChild(geminiSection);
+    }
+
+    function toggleApotheke() {
+      const section = document.getElementById("apotheke-section");
+      const btn = document.getElementById("toggleApothekeBtn");
+
+      if (section.style.display === "none") {
+        section.innerHTML = `<h2 class="section-title"> Verfügbar in Preussen Apotheke</h2>`;
+        if (lastApothekeResults.length === 0) {
+          section.innerHTML += "<p>Keine Produkte gefunden.</p>";
+        } else {
+          lastApothekeResults.forEach((prod, idx) => {
+            const card = document.createElement("div");
+            card.className = "card";
+            card.innerHTML = `
+              <h3>${prod.name || "Unbekannt"}</h3>
+              <p><b>PZN:</b> ${prod.pzn || "-"}<br>
+                 <b>Preis:</b> ${prod.price || "-"}<br>
+                 <a href="${prod.link}" target="_blank">Zum Produkt</a></p>
+              <button onclick="getMSS('${encodeURIComponent(JSON.stringify(prod))}', 'apotheke-${idx}')">Get MSS Strategy</button>
+              <div id="mss-apotheke-${idx}" class="mss"></div>
+            `;
+            section.appendChild(card);
+          });
+        }
+        section.style.display = "block";
+        btn.textContent = " Preussen Apotheke Ergebnisse ausblenden";
+      } else {
+        section.style.display = "none";
+        btn.textContent = " Preussen Apotheke Ergebnisse anzeigen";
+      }
+    }
+
+  async function getMSS(medStr, divId) {
+  const med = JSON.parse(decodeURIComponent(medStr));
+  const targetDiv = document.getElementById(`mss-${divId}`);
+  targetDiv.innerHTML = "Erstelle MSS-Strategie...";
+
+  const prompt = `
+Erstelle eine umfassende Marketing-, Sales- und Social-Media-Strategie für das Produkt:
+${JSON.stringify(med, null, 2)}
+
+Die Strategie soll Mikro- bis Makro-Ebene abdecken:
+- Markteintrittsstrategie
+- Zielgruppenanalyse (Deutschland)
+- Digitale Kampagnenpläne
+- Content-Kalender (Posts, Videos, Stories)
+- Moodboards, Themenideen (z.B. saisonal, Wetter, Feiertage)
+- Verkaufsaktionen und Promotions
+- AI-basierte Optimierungen (Timing, Zielgruppen-Targeting, Reichweite)
+- Detaillierte Schritt-für-Schritt Umsetzung
+
+Antwort in strukturiertem Text, nicht JSON.
+`;
+
+  try {
+    const res = await fetch(
+      `${BACKEND_URL}/gemini?query=${encodeURIComponent(prompt)}`
+    );
+    const data = await res.json();
+    const text =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text || "Keine Strategie generiert.";
+    targetDiv.innerHTML = `<h4>MSS Strategie</h4><pre>${text}</pre>`;
+  } catch (err) {
+    console.error("Gemini proxy error:", err);
+    targetDiv.innerText = "Fehler beim Erstellen der MSS-Strategie.";
+  }
+}
+
+  </script>
+</body>
+</html>
+
+
+
+
+<!-- <!DOCTYPE html>  
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Apotheke Medizin Finder</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; background: #f8f9fa; }
+    h1 { color: #0d6efd; }
+    .search-box { margin-bottom: 1rem; }
+    input, button { padding: 0.5rem; font-size: 1rem; }
+    .results { margin-top: 1rem; }
+    .card { background: #fff; padding: 1rem; margin-bottom: 1rem; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    pre { white-space: pre-wrap; background: #f1f1f1; padding: 0.5rem; border-radius: 4px; }
+    .section-title { margin-top: 2rem; color: #198754; }
+  </style>
+</head>
+<body>
+  <h1>Apotheke Medizin Finder</h1>
+  <div class="search-box">
+    <input id="query" type="text" placeholder="Medizin oder Symptom eingeben..." size="40">
+    <button onclick="searchMedicine()">Suchen</button>
+  </div>
+  <div id="results" class="results"></div>
+
+  <script>
+    const API_KEY = "YOUR_GEMINI_KEY"; //  
+    const MODEL = "gemini-2.0-flash";
+    const BACKEND_URL = "http://127.0.0.1:8000"; // FastAPI backend
+
+    async function searchMedicine() {
+      const query = document.getElementById("query").value;
+      if (!query) return;
+
+      document.getElementById("results").innerHTML = "Suche läuft...";
+
+      const [geminiResults, apothekeResults] = await Promise.all([
+        fetchGemini(query),
+        fetchApotheke(query)
+      ]);
+
+      renderResults(geminiResults, apothekeResults);
+    }
+
+    async function fetchGemini(query) {
+      const prompt = `
+You are a professional German pharmacy assistant. Given the user query ("${query}"), return a JSON array of recommended medicines available in German pharmacies.
+For each medicine, provide:
+- product_name
+- brand
+- pzn
+- pack_sizes
+- vegan
+- rx_required
+- active_ingredient
+- dose_per_unit
+- indications
+- why_recommended
+- confidence
+
+Additionally, for the first medicine, generate a detailed Marketing, Sales, and Social Media strategy.
+Return JSON only.
+`;
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }] }]
+          })
+        });
+
+        const data = await response.json();
+        let text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        text = text.trim();
+        if (text.startsWith("```")) {
+          text = text.replace(/```(json)?/g, "").trim();
+        }
+        return JSON.parse(text);
+      } catch (err) {
+        console.error("Gemini error:", err);
+        return [];
+      }
+    }
+
+    async function fetchApotheke(query) {
+      try {
+        const res = await fetch(`${BACKEND_URL}/search?query=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        return data.results || [];
+      } catch (err) {
+        console.error("Apotheke error:", err);
+        return [];
+      }
+    }
+
+    function renderResults(gemini, apotheke) {
+      const container = document.getElementById("results");
+      container.innerHTML = "";
+
+      // Gemini section
+      const geminiSection = document.createElement("div");
+      geminiSection.innerHTML = `<h2 class="section-title"> Empfehlungen (AI)</h2>`;
+      if (gemini.length === 0) {
+        geminiSection.innerHTML += "<p>Keine Ergebnisse gefunden.</p>";
+      } else {
+        gemini.forEach((med, idx) => {
+          const card = document.createElement("div");
+          card.className = "card";
+          card.innerHTML = `
+            <h3>${med.product_name || "Unbekannt"} (${med.brand || ""})</h3>
+            <p><b>PZN:</b> ${med.pzn || "-"}<br>
+               <b>Wirkstoff:</b> ${med.active_ingredient || "-"}<br>
+               <b>Dosis:</b> ${med.dose_per_unit || "-"}<br>
+               <b>Packs:</b> ${med.pack_sizes || "-"}<br>
+               <b>Vegan:</b> ${med.vegan}<br>
+               <b>Rezeptpflichtig:</b> ${med.rx_required}<br>
+               <b>Indikationen:</b> ${med.indications || "-"}<br>
+               <b>Empfehlung:</b> ${med.why_recommended || "-"}<br>
+               <b>Sicherheit:</b> ${med.confidence || "-"}<br>
+          `;
+          if (idx === 0 && med.mss_strategy) {
+            card.innerHTML += `<h4>MSS-Strategie</h4><pre>${JSON.stringify(med.mss_strategy, null, 2)}</pre>`;
+          }
+          geminiSection.appendChild(card);
+        });
+      }
+      container.appendChild(geminiSection);
+
+      // Apotheke sectionuvicorn main:app - reload
+      const apothekeSection = document.createElement("div");
+      apothekeSection.innerHTML = `<h2 class="section-title"> Verfügbar in Preussen Apotheke</h2>`;
+      if (apotheke.length === 0) {
+        apothekeSection.innerHTML += "<p>Keine Produkte gefunden.</p>";
+      } else {
+        apotheke.forEach(prod => {
+          const card = document.createElement("div");
+          card.className = "card";
+          card.innerHTML = `
+            <h3>${prod.name || "Unbekannt"}</h3>
+            <p><b>PZN:</b> ${prod.pzn || "-"}<br>
+               <b>Hersteller:</b> ${prod.manufacturer || "-"}<br>
+               <b>Preis:</b> ${prod.price || "-"}<br>
+               <a href="${prod.link}" target="_blank">Zum Produkt</a></p>
+          `;
+          apothekeSection.appendChild(card);
+        });
+      }
+      container.appendChild(apothekeSection);
+    }
+  </script>
+</body>
+</html> -->
