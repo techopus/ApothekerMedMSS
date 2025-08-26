@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import subprocess, json
+import os
 
 app = FastAPI()
 
@@ -12,12 +13,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/")
+def home():
+    return {"message": "Apotheke Medizin Finder API is running"}
+
 @app.get("/search")
 def search_medicine(query: str):
     try:
-        # Call Node.js scraper
+        # Get the current directory path
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        scrapper_path = os.path.join(current_dir, "scrapper.js")
+
+        # Call Node.js scraper  -- now this isfixed path
         result = subprocess.run(
-            ["node", "scrapper.js", query],
+            ["node", scrapper_path, query],
             capture_output=True,
             text=True,
             check=True
