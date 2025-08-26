@@ -1,15 +1,20 @@
 {
-  "name": "presusseapotheke-medicine-recommender",
+  "name": "apotheke-backend",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "Backend for Apotheke Medizin Finder",
+  "main": "scrapper.js",
   "scripts": {
+    "start": "node scrapper.js",
+    "postinstall": "npx playwright install --with-deps",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
   "dependencies": {
     "playwright": "^1.55.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
